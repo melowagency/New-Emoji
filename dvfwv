@@ -1,0 +1,193 @@
+import time
+from datetime import datetime
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import NoSuchElementException
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import ElementClickInterceptedException
+
+driver_path = r"/Users/jagonorton/Desktop/Arc downloads/chromedriver-mac-arm64/chromedriver"
+service = Service(executable_path=driver_path)
+driver = webdriver.Chrome(service=service)
+driver.get(f'https://app.storrito.com/#/login?redirect=%2F%23%2F')
+driver.maximize_window()
+
+time.sleep(5)
+
+the_email = "info@melowagency.com"
+the_password = "?B00bies22"
+wait = WebDriverWait(driver, 10)
+
+
+def login():
+    try:
+
+        email = driver.find_element(By.CSS_SELECTOR, "input[type='email']")
+        password = driver.find_element(By.CSS_SELECTOR, "input[type='password']")
+
+        email.click()
+        email.clear()
+        email.send_keys(the_email)
+
+        password.click()
+        password.clear()
+        password.send_keys(the_password)
+
+        login_button = driver.find_element(By.XPATH, "//button[@type='submit' and normalize-space()='Login']")
+        login_button.click()
+        time.sleep(10)  
+
+        yearly = driver.find_element(By.XPATH, '//button[contains(text(), "Don\'t show again")]')
+        yearly.click()
+
+    except NoSuchElementException:
+        print("Problem in login or navigating to analytics page")
+
+def find_and_store_usernames():
+    try:
+        username_elements = wait.until(EC.presence_of_all_elements_located(
+            (By.CSS_SELECTOR, "div.text-center.overflow-hidden")))
+        
+        valid_usernames = {elem.text: elem for elem in username_elements if is_valid_username(elem.text)}
+        return valid_usernames
+    except TimeoutException:
+        print("Timeout while waiting for usernames to load.")
+        return {}
+    
+def is_valid_username(username):
+    return '.JPG' not in username and '.PNG' not in username and  'jpg' not in username and len(username) > 0
+
+def select_user(username_dict, number_to_username):
+    selected_number = input("Enter the number for the username or type 'All' to select all: ")
+
+    if selected_number.lower() == 'all':
+        for username in username_dict.keys():
+            perform_action_for_user(username_dict[username])
+            print(f"Finished actions for {username}")
+    else:
+        try:
+            selected_username = number_to_username[selected_number]
+            perform_action_for_user(username_dict[selected_username])
+            print(f"Finished actions for {selected_username}")
+        except KeyError:
+            print(f"Invalid selection: {selected_number}")
+
+def perform_action_for_user(user_element):
+    max_attempts = 5
+    attempts = 0
+
+    while attempts < max_attempts:
+        try:
+            user_element.click()
+            print("Element clicked successfully.")
+            break  
+
+        except ElementClickInterceptedException:
+            print("Element not clickable, scrolling and retrying...")
+            ActionChains(driver).move_to_element(user_element).perform()
+
+            # Alternatively, you can scroll a fixed amount
+            # driver.execute_script("window.scrollBy(0, 100);")
+
+            attempts += 1
+            time.sleep(1)
+
+    if attempts == max_attempts:
+        print("Failed to click the element after several attempts.")
+        
+    time.sleep(5)
+
+    processed_ids = set()
+    video_processed_count = 0  
+
+    try:
+        while True:
+            videos = wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div[data-id]")))
+            if not videos or video_processed_count >= 10:
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                video_processed_count = 0
+                time.sleep(2)  
+                continue
+
+            for i in range(len(videos)):
+                videos = driver.find_elements(By.XPATH, "//div[@data-id and not(@data-id='tooltip')]")
+                if i >= len(videos):
+                    break  
+
+                video = videos[i]
+                data_id = video.get_attribute("data-id")
+
+                if data_id and data_id.isdigit() and data_id not in processed_ids:
+                    processed_ids.add(data_id)
+                    try:
+                        date_text = video.find_element(By.XPATH, "../../div[contains(@class, 'flex-col')]/div[contains(@class, 'mb-1')]").text
+                        if not date_text:
+                            print("Found a video element with no date, skipping...")
+                            continue
+
+                        post_date = parse_date(date_text)
+                        if post_date and post_date > datetime.now():
+                            perform_action_on_video(video)
+                            print(f"Action performed on video scheduled for {date_text}")
+                        else:
+                            print(f"Skipping video scheduled for {date_text}")
+                        video_processed_count += 1  
+
+                    except NoSuchElementException:
+                        print("Date element not found for a video, skipping...")
+                        continue
+                elif data_id and data_id.isdigit():
+                    video_processed_count += 1
+                else:
+                    print(f"Skipping duplicate or invalid video element with data-id: {data_id}")
+
+            if len(videos) < 1:
+                break  
+
+    except TimeoutException:
+        print("Timeout while waiting for videos to load.")
+
+def parse_date(date_text):
+    try:
+        return datetime.strptime(date_text, "%a, %Y-%m-%d")
+    except ValueError:
+        return None
+
+def perform_action_on_video(video_element):
+    try:
+        edit_button_xpath = ".//a[contains(@class, 'text-sm') and contains(@class, 'justify-center') and contains(@class, 'text-center') and contains(., 'Edit')]"
+        edit_button = video_element.find_element(By.XPATH, edit_button_xpath)
+        edit_button.click()
+        
+        time.sleep(5)
+
+        save_button_xpath = "//button[normalize-space(.)='Save']"
+        save_button = driver.find_element(By.XPATH, save_button_xpath)  
+        save_button.click()
+
+        time.sleep(10)
+
+    except NoSuchElementException:
+        print("An element was not found during the edit process.")
+        time.sleep(10)
+    except TimeoutException:
+        print("Timeout occurred during the edit process.")
+        time.sleep(10)
+
+login()
+
+username_dict = find_and_store_usernames()
+
+number_to_username = {str(index + 1): username for index, username in enumerate(username_dict.keys())}
+
+for number, username in number_to_username.items():
+    print(f"{number}: {username}")
+#print("All: Select all users")
+
+select_user(username_dict, number_to_username)
+
+time.sleep(10)
